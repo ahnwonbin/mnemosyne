@@ -2,6 +2,8 @@
 
 A persistent project-memory bridge for coding agents. Mnemosyne captures supported CLI events, queues them durably, and makes project-scoped context available across sessions.
 
+When a coding session ends, its decisions and unfinished work should remain available to the next session. The bridge handles capture and reliable delivery; project-scoped recall returns relevant observations and compact summaries.
+
 **Stack:** Python 3.11+, SQLite/FTS5, FastAPI, Pydantic, HTTPX, and the Model Context Protocol (MCP).
 
 ## Memory lifecycle
@@ -24,6 +26,12 @@ Capture is separated from delivery: client adapters normalize supported hook for
 
 The upstream path uses [Claude-Mem](https://github.com/thedotmack/claude-mem) for its worker and observation pipeline. `server/` is an independent Python reference backend. The current implementation does **not** include vector embeddings, cosine-similarity search, or an automatic memory-decay pipeline; search is full-text (FTS5), and project summaries are versioned.
 
+## What this repository implements
+
+The project-specific code includes the client adapters, durable outbox, project identity and discovery, context cache, and upstream transport in `bridge/`. The independent `server/` reference implementation provides authenticated ingestion, SQLite storage, observation processing, versioned summaries, FTS5 retrieval, and an MCP interface.
+
+The integrated upstream worker and its observation pipeline come from [Claude-Mem](https://github.com/thedotmack/claude-mem). [Hermes Agent](https://github.com/NousResearch/hermes-agent) supplies the agent runtime used by the integration. These are upstream projects with their own authorship and licenses.
+
 ## Quickstart
 
 Requires Python 3.11 or newer. In PowerShell, run these three command lines from the repository root:
@@ -31,12 +39,25 @@ Requires Python 3.11 or newer. In PowerShell, run these three command lines from
 ```powershell
 python -m venv .venv
 .venv/Scripts/python.exe -m pip install -r requirements.lock; .venv/Scripts/python.exe -m pip install --no-deps -e .
-.venv/Scripts/python.exe -m bridge.cli --help
+.venv/Scripts/python.exe -m examples.local_recall
 ```
+
+The demo queues a sample decision, ingests it into the reference backend, processes it with the built-in rule-based extractor, then reopens the database and searches for `SQLite`. It prints `Ingestion: accepted`, the observation count, and the recalled decision. It runs offline using temporary databases; no API keys or agent-hook installation are needed. This demonstrates local persistence and retrieval; native hook dispatch and upstream delivery are separate integration steps.
 
 On Linux or macOS, use `.venv/bin/python` in place of `.venv/Scripts/python.exe`.
 
-To start the local reference API, create credentials with `python examples/create_credentials.py`, set `HERMES_MEMORY_CREDENTIALS` and `HERMES_MEMORY_DB`, then run `python -m server.api`. The API listens on `127.0.0.1:8787`; project and memory routes require a bearer credential.
+To inspect bridge commands, run `.venv/Scripts/python.exe -m bridge.cli --help`.
+
+To start the local reference API in PowerShell:
+
+```powershell
+.venv/Scripts/python.exe examples/create_credentials.py
+$env:HERMES_MEMORY_CREDENTIALS = "credentials.local.json"
+$env:HERMES_MEMORY_DB = "memory.local.db"
+.venv/Scripts/python.exe -m server.api
+```
+
+The API listens on `127.0.0.1:8787`; project and memory routes require a bearer credential. The credential generator writes the token to `admin-token.local.txt` and its hash to `credentials.local.json`; both files and the database are ignored by Git. It refuses to overwrite existing credentials.
 
 ## Architecture and module boundaries
 
@@ -55,9 +76,26 @@ To start the local reference API, create credentials with `python examples/creat
 
 ## Local retrieval benchmark
 
-A synthetic FTS5 smoke benchmark on Windows with Python 3.13 indexed 10,000 observations. Across 60 repeated warm-cache searches through `search_memories`, median latency was **1.65 ms** and p95 was **2.25 ms**. The SQLite database occupied **4.0 MiB** after checkpointing. This is on one local machine and a synthetic corpus; database size is disk footprint, not process RAM. It is not a vector-search or production workload benchmark.
+Run the included benchmark after installing dependencies:
 
-The benchmark corpus and method are described here so results are not mistaken for a general performance guarantee. Re-run under your target hardware and workload before comparing systems.
+```powershell
+.venv/Scripts/python.exe -m benchmarks.retrieval_benchmark --records 10000 --queries 60
+```
+
+The script creates a temporary SQLite database with 10,000 deterministic observations and their FTS5 index. It performs 10 warmup searches, then measures 60 repeated calls to `search_memories` for `topic0`, with a five-result limit and a 1,000-token estimated response budget. Timing includes connection setup, FTS5/BM25 ranking, and response construction; corpus creation and observation extraction are excluded.
+
+Example measured run on Windows 11, Python 3.12.13, SQLite 3.50.4, and an Intel Family 6 / Model 186 processor:
+
+| Measurement | Result |
+| --- | ---: |
+| Observations indexed | 10,000 |
+| Median retrieval latency | 2.48 ms |
+| p95 retrieval latency | 3.09 ms |
+| Checkpointed database size | 5.31 MiB |
+
+These measurements replace the earlier ad hoc smoke-benchmark figures with results from the included script.
+
+Output includes median and p95 latency, Python/SQLite versions, platform and processor details, and checkpointed database size. Database size measures disk usage, not process RAM. This is a synthetic warm-cache reference-backend benchmark; results depend on hardware, corpus, and query selectivity.
 
 ## Tests
 
