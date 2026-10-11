@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hermes-project-memory"
+version = "0.2.0"
+description = "Local CLI capture and cloud project memory for Hermes"
+requires-python = ">=3.11"
+dependencies = ["fastapi>=0.115,<1", "httpx>=0.28,<1", "uvicorn>=0.30,<1", "pydantic>=2.10,<3"]
+
+[project.optional-dependencies]
+test = ["pytest>=9.0.3,<10"]
+
+[project.scripts]
+hermes-bridge = "bridge.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["bridge*", "server*"]
+
+[tool.setuptools.package-data]
+server = ["migrations/*.sql"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
